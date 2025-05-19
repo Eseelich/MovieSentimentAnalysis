@@ -1,0 +1,181 @@
+# -*- coding: utf-8 -*-
+"""
+Fine-tune DistilBERT for 3-class sentiment classification
+with text cleaning to improve results (English comments)
+"""
+
+import re
+import string
+import pandas as pd
+import nltk
+import torch
+from torch.utils.data import Dataset
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSequenceClassification,
+    TrainingArguments,
+    Trainer,
+    pipeline
+)
+from tqdm import tqdm
+
+# 1. Download NLTK resources for cleaning
+nltk.download('stopwords')
+nltk.download('punkt')
+nltk.download('wordnet')
+
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+from nltk.tokenize import word_tokenize
+
+# 2. Initialize stopwords and lemmatizer
+stop_words = set(stopwords.words('english'))
+lemmatizer = WordNetLemmatizer()
+
+# 3. Define text cleaning function
+def clean_text(text):
+    text = text.lower()
+    text = re.sub(r'http\S+|www\.\S+', '', text)                 # remove URLs
+    text = re.sub(r'\[.*?\]\(.*?\)', '', text)                  # remove Markdown links
+    text = re.sub(r'/u/\w+|u/\w+', '', text)                     # remove Reddit usernames
+    text = re.sub(r'<.*?>', '', text)                            # remove HTML tags
+    text = re.sub(r'\d+', '', text)                              # remove digits
+    text = text.translate(str.maketrans('', '', string.punctuation))  # remove punctuation
+    tokens = word_tokenize(text)
+    tokens = [t for t in tokens if t.isalpha() and t not in stop_words]  # keep alphabetic non-stopwords
+    tokens = [lemmatizer.lemmatize(t) for t in tokens]           # lemmatize
+    return ' '.join(tokens)
+
+# 4. Load labeled sample for training/evaluation
+df = pd.read_excel('sample_labeled.xlsx', engine='openpyxl')  # columns: comment_body, sentiment
+df['cleaned_body'] = df['comment_body'].apply(clean_text)
+
+# 5. Encode labels
+label2id = {'negative': 0, 'neutral': 1, 'positive': 2}
+df['label'] = df['sentiment'].map(label2id)
+
+# 6. Stratified train/test split
+train_df, test_df = train_test_split(
+    df, test_size=0.2, stratify=df['label'], random_state=42
+)
+
+# 7. Oversample minority classes in training set
+max_count = train_df['label'].value_counts().max()
+oversampled = []
+for lbl, grp in train_df.groupby('label'):
+    oversampled.append(grp.sample(n=max_count, replace=True, random_state=42))
+train_bal = pd.concat(oversampled).sample(frac=1, random_state=42)
+
+# 8. Prepare tokenizer and Dataset class
+model_name = 'distilbert-base-uncased'
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+class SentimentDataset(Dataset):
+    def __init__(self, texts, labels, tokenizer, max_length=128):
+        self.texts = texts.tolist()
+        self.labels = labels.tolist()
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+    def __len__(self):
+        return len(self.texts)
+    def __getitem__(self, idx):
+        enc = self.tokenizer(
+            self.texts[idx],
+            truncation=True,
+            padding='max_length',
+            max_length=self.max_length,
+            return_tensors='pt'
+        )
+        item = {k: v.squeeze(0) for k, v in enc.items()}
+        item['labels'] = torch.tensor(self.labels[idx], dtype=torch.long)
+        return item
+
+# 9. Create PyTorch datasets using cleaned text
+train_dataset = SentimentDataset(train_bal['cleaned_body'], train_bal['label'], tokenizer)
+eval_dataset  = SentimentDataset(test_df['cleaned_body'],    test_df['label'],    tokenizer)
+
+# 10. Load pre-trained model with 3 output labels
+model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=3)
+
+# 11. Define training arguments (matching eval/save strategy)
+training_args = TrainingArguments(
+    output_dir='hf-sentiment-finetuned',
+    overwrite_output_dir=True,
+    num_train_epochs=5,
+    learning_rate=2e-5,
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=16,
+    weight_decay=0.01,
+    logging_dir='logs',
+    logging_steps=20,
+    do_train=True,
+    do_eval=True,
+    eval_strategy='steps',
+    eval_steps=200,
+    save_strategy='steps',
+    save_steps=200,
+    save_total_limit=1,
+    load_best_model_at_end=True,
+    metric_for_best_model='f1_macro',
+    greater_is_better=True
+)
+
+# 12. Define metric computation
+def compute_metrics(eval_pred):
+    logits, labels = eval_pred
+    preds = logits.argmax(axis=1)
+    return {
+        'accuracy': accuracy_score(labels, preds),
+        'f1_macro': f1_score(labels, preds, average='macro')
+    }
+
+# 13. Initialize Trainer
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
+    tokenizer=tokenizer,
+    compute_metrics=compute_metrics
+)
+
+# 14. Train the model
+trainer.train()
+
+# 15. Evaluate on the test set
+preds_output = trainer.predict(eval_dataset)
+preds = preds_output.predictions.argmax(axis=1)
+true = preds_output.label_ids
+print(f"\nTest Accuracy: {accuracy_score(true, preds):.4f}\n")
+print("Classification Report:")
+print(classification_report(true, preds, target_names=['negative','neutral','positive']))
+print("Confusion Matrix:")
+print(confusion_matrix(true, preds, labels=[0,1,2]))
+
+# 16. Save the fine-tuned model
+try:
+    trainer.save_model('distilbert-sentiment-final')
+    tokenizer.save_pretrained('distilbert-sentiment-final')
+except:
+    model.save_pretrained('distilbert-sentiment-final', safe_serialization=False)
+    tokenizer.save_pretrained('distilbert-sentiment-final')
+
+# 17. Inference on full dataset with cleaning
+df_full = pd.read_csv('Pirates 2 .csv')
+df_full['cleaned_body'] = df_full['comment_body'].apply(clean_text)
+pipe = pipeline(
+    'sentiment-analysis',
+    model='distilbert-sentiment-final',
+    tokenizer=model_name
+)
+tqdm.pandas(desc="Predicting full data")
+df_full['sentiment'] = df_full['cleaned_body'].progress_apply(
+    lambda txt: pipe(txt, truncation=True)[0]['label'].lower()
+)
+
+# 18. Save predictions
+df_full.to_csv('Pirates_with_custom_sentiment.csv', index=False)
+print("\nDone: Pirates_with_custom_sentiment.csv created.")
+
