@@ -42,7 +42,7 @@ def load_labeled_data(file_map):
     for movie_id, path in file_map.items():
         df = pd.read_excel(path, engine='openpyxl')
         # Drop rows with missing comments or labels
-        df = df.dropna()
+        df = df.dropna(subset=['comment_body', 'sentiment'])
         df['movie'] = movie_id
         df['cleaned_body'] = df['comment_body'].apply(clean_text)
         df['label'] = df['sentiment'].map(label2id)
@@ -162,3 +162,4 @@ def ensemble_predict(models, vecs, texts, neg_thr, weights):
     w_tf, w_svc, w_lr = weights
     probs = w_tf*probs_tf + w_svc*probs_svc + w_lr*probs_lr
     return [0 if p[0]>=neg_thr else 1+np.argmax(p[1:]) for p in probs]
+

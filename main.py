@@ -86,5 +86,39 @@ if __name__ == '__main__':
     }
     with open('pipeline_results.pkl', 'wb') as f:
         pickle.dump(results, f)
-    print("All models and results saved: 'distilbert_finetuned/', 'tokenizer/', 'svc_clf.pkl', 'lr_clf.pkl', pipeline_results.pkl")
-    print(confusion_matrix(test_df['label'], preds_final, labels=[0,1,2]))
+    print("All models and results saved: 'distilbert_finetuned/', 'tokenizer/', 'svc_clf.pkl', 'lr_clf.pkl', 'pipeline_results.pkl'")
+
+        # Statistics of predicted sentiment distribution
+    import matplotlib.pyplot as plt
+    stats = pd.Series(preds_final).value_counts(normalize=True).sort_index()
+    stats.index = ['negative', 'neutral', 'positive']
+    print("=== Predicted Sentiment Distribution ===")
+    print(stats)
+    # Plot distribution
+    stats.plot(kind='bar')
+    plt.title('Predicted Sentiment Distribution')
+    plt.ylabel('Proportion')
+    plt.xlabel('Sentiment')
+    plt.tight_layout()
+    plt.savefig('predicted_distribution.png')
+    plt.show()
+
+    # Confusion matrix heatmap
+    import matplotlib.pyplot as plt
+    cm = confusion_matrix(test_df['label'], preds_final, labels=[0,1,2])
+    from sklearn.metrics import ConfusionMatrixDisplay
+    disp = ConfusionMatrixDisplay(cm, display_labels=['negative','neutral','positive'])
+    disp.plot(cmap='Blues')
+    plt.title('Confusion Matrix')
+    plt.savefig('confusion_matrix.png')
+    plt.show()
+
+    # Classification report bar chart
+    report_data = classification_report(test_df['label'], preds_final, target_names=['negative','neutral','positive'], output_dict=True)
+    report_df = pd.DataFrame(report_data).transpose()
+    report_df[['precision','recall','f1-score']].plot(kind='bar')
+    plt.title('Classification Metrics by Class')
+    plt.xticks(rotation=0)
+    plt.tight_layout()
+    plt.savefig('classification_report.png')
+    plt.show()
