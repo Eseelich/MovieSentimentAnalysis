@@ -1,4 +1,3 @@
-
 import argparse
 import pandas as pd
 import numpy as np
@@ -64,4 +63,28 @@ if __name__ == '__main__':
         target_names=['negative', 'neutral', 'positive']
     ))
     print('Confusion Matrix:')
+    print(confusion_matrix(test_df['label'], preds_final, labels=[0,1,2]))
+
+    # Save models and variables for later analysis
+    import joblib
+    import pickle
+    # Save DistilBERT model and tokenizer
+    tm.save_pretrained('distilbert_finetuned')
+    tok.save_pretrained('tokenizer')
+    # Save classical models
+    joblib.dump(svc_clf, 'svc_clf.pkl')
+    joblib.dump(lr_clf, 'lr_clf.pkl')
+    # Save pipeline variables and results
+    results = {
+        'neg_thr': neg_thr,
+        'best_weights': best_weights,
+        'test_accuracy': best_acc,
+        'classification_report': classification_report(test_df['label'], preds_final, target_names=['negative','neutral','positive'], output_dict=True),
+        'confusion_matrix': confusion_matrix(test_df['label'], preds_final, labels=[0,1,2]).tolist(),
+        'predictions': preds_final,
+        'true_labels': test_df['label'].tolist()
+    }
+    with open('pipeline_results.pkl', 'wb') as f:
+        pickle.dump(results, f)
+    print("All models and results saved: 'distilbert_finetuned/', 'tokenizer/', 'svc_clf.pkl', 'lr_clf.pkl', pipeline_results.pkl")
     print(confusion_matrix(test_df['label'], preds_final, labels=[0,1,2]))
