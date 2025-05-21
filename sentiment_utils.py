@@ -41,6 +41,8 @@ def load_labeled_data(file_map):
     dfs = []
     for movie_id, path in file_map.items():
         df = pd.read_excel(path, engine='openpyxl')
+        # Drop rows with missing comments or labels
+        df = df.dropna()
         df['movie'] = movie_id
         df['cleaned_body'] = df['comment_body'].apply(clean_text)
         df['label'] = df['sentiment'].map(label2id)
@@ -101,7 +103,6 @@ def train_transformer(train_df, eval_df,
         load_best_model_at_end=True,
         metric_for_best_model='f1_macro'
     )
-    
     def compute_metrics(pred):
         logits, labels = pred
         preds = logits.argmax(axis=1)
