@@ -19,39 +19,66 @@ from sklearn.svm import LinearSVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.calibration import CalibratedClassifierCV
 
-# 1. Text cleaning
-stop_words = set(ENGLISH_STOP_WORDS)
-
-def clean_text(text):
-    text = str(text).lower()
-    text = re.sub(r"http\S+|www\.\S+", "", text)
-    text = re.sub(r"\[.*?\]\(.*?\)", "", text)
-    text = re.sub(r"/?u/\w+", "", text)
-    text = re.sub(r"<.*?>", "", text)
-    text = re.sub(r"\d+", "", text)
-    text = text.translate(str.maketrans("", "", string.punctuation))
-    tokens = re.findall(r"\b[a-z]+\b", text)
-    return " ".join([t for t in tokens if t not in stop_words])
-
-# 2. Load labeled data
+# Label mappings
 label2id = {"negative": 0, "neutral": 1, "positive": 2}
 id2label = {v: k for k, v in label2id.items()}
+
+# Precompute stopwords
+stop_words = set(ENGLISH_STOP_WORDS)
+
+# Text cleaning
+def clean_text(text):
+    # 0) Immer erst String draus machen
+    text = str(text)
+
+    # 1) Lowercase
+    text = text.lower()
+    # 2) Remove URLs
+    text = re.sub(r"http\S+|www\.\S+", "", text)
+    # 3) Remove markdown links ([text](url))
+    text = re.sub(r"\[.*?\]\(.*?\)", "", text)
+    # 4) Remove Reddit user references
+    text = re.sub(r"/?u/\w+", "", text)
+    # 5) Remove HTML tags
+    text = re.sub(r"<.*?>", "", text)
+    # 6) Remove digits and punctuation
+    text = re.sub(r"\d+", "", text)
+    text = text.translate(str.maketrans("", "", string.punctuation))
+    # 7) Tokenize on whitespace & non-word boundaries
+    tokens = re.findall(r"\b[a-z]+\b", text)
+    # 8) Remove stopwords
+    tokens = [t for t in tokens if t not in stop_words]
+    return " ".join(tokens)
 
 def load_labeled_data(file_map):
     dfs = []
     for movie_id, path in file_map.items():
-        df = pd.read_excel(path, engine='openpyxl')
-        # Drop rows with missing comments or labels
-        df = df.dropna()
-        df['movie'] = movie_id
-        df['cleaned_body'] = df['comment_body'].apply(clean_text)
-        df['label'] = df['sentiment'].map(label2id)
-        dfs.append(df[['movie', 'cleaned_body', 'label']])
+        df = pd.read_excel(path, engine="openpyxl")
+        df = df.dropna(subset=["comment_body", "sentiment"])
+        df["movie"] = movie_id
+        df["cleaned_body"] = df["comment_body"].apply(clean_text)
+
+        # Wert-weise Mapping-Funktion
+        def map_label(x):
+            # Falls schon int, direkt übernehmen
+            if isinstance(x, (int, np.integer)):
+                return int(x)
+            # Sonst String → lowercase → trim → map
+            xs = str(x).lower().strip()
+            return label2id.get(xs, None)  # None, wenn unbekanntes Label
+
+        df["label"] = df["sentiment"].apply(map_label)
+        # Zeilen ohne gültiges Label entfernen
+        df = df.dropna(subset=["label"])
+        df["label"] = df["label"].astype(int)
+
+        dfs.append(df[["movie", "cleaned_body", "label"]])
+
     return pd.concat(dfs, ignore_index=True)
 
 # 3. Split & oversample
 def split_and_oversample(df, test_size=0.2, random_state=42):
-    train_df, test_df = train_test_split(
+    train_df, test_df = train_test_split(  
         df, test_size=test_size,
         stratify=df[['movie', 'label']],
         random_state=random_state
@@ -162,3 +189,4 @@ def ensemble_predict(models, vecs, texts, neg_thr, weights):
     w_tf, w_svc, w_lr = weights
     probs = w_tf*probs_tf + w_svc*probs_svc + w_lr*probs_lr
     return [0 if p[0]>=neg_thr else 1+np.argmax(p[1:]) for p in probs]
+
