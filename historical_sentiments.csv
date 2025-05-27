@@ -1,0 +1,11 @@
+movie_id,series,title,mean_sentiment,budget_musd,rating_pct,box_office_musd
+1,Pirates,Pirates 1 – Curse of the Black Pearl,1.203151,140.0,80,654.264015
+2,Pirates,Pirates 2 – Dead Man's Chest,1.175405,225.0,53,1066.179725
+3,Pirates,Pirates 3 – At World's End,1.187528,300.0,44,960.996492
+4,Pirates,Pirates 4 – On Stranger Tides,1.091575,378.5,33,1045.713802
+5,Pirates,Pirates 5 – Dead Men Tell No Tales,1.120162,275.0,30,794.881442
+6,Twilight,Twilight 1,1.085278,37.0,49,407.187715
+7,Twilight,Twilight – New Moon,1.13858,50.0,28,709.711008
+8,Twilight,Twilight – Eclipse,1.003589,68.0,46,698.491347
+9,Twilight,Twilight – Breaking Dawn 1,1.098429,127.0,25,712.205856
+10,Twilight,Twilight – Breaking Dawn 2,1.111325,136.0,49,829.74682
